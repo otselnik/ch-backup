@@ -596,6 +596,11 @@ class ClickhouseBackup:
                 metadata_cleaner,
             )
 
+            # Wait for replicated databases to sync
+            self._database_backup_manager.wait_sync_replicated_databases(
+                self._context, restored_databases, keep_going
+            )
+
             # Restore tables and data stored on local disks.
             self._table_backup_manager.restore(
                 context=self._context,
@@ -609,10 +614,6 @@ class ClickhouseBackup:
                 skip_cloud_storage=skip_cloud_storage,
                 keep_going=keep_going,
                 restore_tables_in_replicated_database=restore_tables_in_replicated_database,
-            )
-
-            self._database_backup_manager.wait_sync_replicated_databases(
-                self._context, restored_databases, keep_going
             )
 
             if sources.data and self._context.restore_context.has_failed_parts():

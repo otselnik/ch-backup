@@ -12,7 +12,7 @@ from itertools import chain
 from pathlib import Path
 from random import choices
 from string import ascii_lowercase
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from ch_backup import logging
 from ch_backup.backup.deduplication import deduplicate_parts
@@ -621,13 +621,33 @@ class TableBackup(BackupManager):
             for replica in context.ch_ctl.get_replicas(readonly=True)
         }
 
+        if metadata_cleaner and existing_readonly_tables:
+            replicated_readonly_tables = []
+
+            for table in tables:
+                table_key = (table.database, table.name)
+                if table.is_replicated() and table_key in existing_readonly_tables:
+                    replicated_readonly_tables.append(table)
+
+            if replicated_readonly_tables:
+                existing_readonly_tables -= self._try_fix_readonly_tables(
+                    context,
+                    replicated_readonly_tables,
+                    metadata_cleaner,
+                )
+
+
         result: List[Table] = []
         tables_to_clean_metadata: List[Table] = []
         for table in tables:
             table_name_for_logs = f'"{table.database}"."{table.name}"'
+            is_in_replicated_db = databases[table.database].is_replicated_db_engine()
             existing_table: Optional[Table] = None
+            need_drop = False
+
             if (table.database, table.name) in existing_readonly_tables:
                 existing_table = table
+                need_drop = True
                 logging.warning(
                     f"Table {table_name_for_logs} will be recreated because it is in readonly state",
                 )
@@ -648,6 +668,8 @@ class TableBackup(BackupManager):
                     existing_table.create_statement,
                     table.create_statement,
                 )
+                need_drop = True
+
             elif existing_table := (
                 existing_tables_by_uuid.get(table.uuid) if table.uuid else None
             ):
@@ -659,36 +681,21 @@ class TableBackup(BackupManager):
                     existing_table.create_statement,
                     table.create_statement,
                 )
+                need_drop = True
 
-            if existing_table:
+            # For tables in replicated databases, skip unless explicitly requested.
+            if (
+                not restore_tables_in_replicated_database
+                and is_in_replicated_db
+            ):
+                logging.info(
+                    f"Skipping table {table_name_for_logs} because it is in replicated database and --restore-tables-in-replicated-database flag is not set",
+                )
+                continue
+
+            if need_drop and existing_table:
                 try:
-                    ### If table name longer than `getMaxTableNameLengthForDatabase()` ch function result
-                    ### then we can't drop the table. Just rename it to some random name and drop the table.
-                    ### But for dictionaries doesn't works create/attach with long name, so we can't even restore the dictionary
-                    ### with long name. So it better to keep it.
-                    if existing_table.is_dictionary():
-                        context.ch_ctl.drop_dictionary_if_exists(existing_table)
-                    else:
-                        ### The lightweight copy to that we can modify and use for ch queries
-                        table_to_drop = Table.make_dummy(
-                            existing_table.database,
-                            existing_table.name,
-                        )
-                        if (
-                            len(table.name)
-                            > context.config_root["restore"]["max_table_name"]
-                        ):
-                            new_table_name = "to_drop_" + "".join(
-                                choices(ascii_lowercase, k=RANDOM_TABLE_NAME_LENGTH)
-                            )
-                            table_to_drop.name = new_table_name
-                            context.ch_ctl.drop_table_if_exists(table_to_drop)
-                            context.ch_ctl.rename_table(
-                                existing_table, table_to_drop.name
-                            )
-
-                        context.ch_ctl.drop_table_if_exists(table_to_drop)
-
+                    self._drop_existing_table(context, table, existing_table)
                 except Exception as e:
                     if not keep_going:
                         raise
@@ -703,20 +710,105 @@ class TableBackup(BackupManager):
                 )
                 tables_to_clean_metadata.append(table)
 
-            if (
-                not restore_tables_in_replicated_database
-                and databases[table.database].is_replicated_db_engine()
-            ):
-                logging.info(
-                    f"Skipping table {table_name_for_logs} because it is in replicated database and --restore-tables-in-replicated-database flag is not set",
-                )
-            else:
-                result.append(table)
+            result.append(table)
 
-        if metadata_cleaner:  # type: ignore
+        if metadata_cleaner and tables_to_clean_metadata:
             metadata_cleaner.clean_tables_metadata(tables_to_clean_metadata)
 
         return result
+
+    def _try_fix_readonly_tables(
+        self,
+        context: BackupContext,
+        readonly_tables: List[Table],
+        metadata_cleaner: MetadataCleaner,
+    ) -> Set[Tuple[str, str]]:
+        """
+        Attempt to fix readonly replicated tables in-place by:
+        1. Cleaning ZooKeeper metadata via MetadataCleaner
+        2. Running SYSTEM RESTORE REPLICA
+
+        Returns a set of (database, table_name) tuples for tables that were
+        successfully fixed (no longer readonly after the operation).
+        Tables not present in the returned set are still readonly.
+        """
+        logging.info(
+            "Attempting to fix {} readonly table(s) via metadata cleanup + SYSTEM RESTORE REPLICA",
+            len(readonly_tables),
+        )
+
+        metadata_cleaner.clean_tables_metadata(readonly_tables)
+
+        for table in readonly_tables:
+            try:
+                logging.debug(
+                    'Running SYSTEM RESTORE REPLICA for "{}"."{}"',
+                    table.database,
+                    table.name,
+                )
+                context.ch_ctl.restore_replica(table)
+            except Exception as e:
+                logging.warning(
+                    'SYSTEM RESTORE REPLICA failed for "{}"."{}", will attempt to recreate: {}',
+                    table.database,
+                    table.name,
+                    repr(e),
+                )
+
+        still_readonly = {
+            (replica["database"], replica["table"])
+            for replica in context.ch_ctl.get_replicas(readonly=True)
+        }
+
+        fixed: Set[Tuple[str, str]] = set()
+        for table in readonly_tables:
+            key = (table.database, table.name)
+            if key not in still_readonly:
+                logging.info(
+                    'Table "{}"."{}" successfully fixed from readonly state',
+                    table.database,
+                    table.name,
+                )
+                fixed.add(key)
+            else:
+                logging.warning(
+                    'Table "{}"."{}" is still readonly after fix attempt',
+                    table.database,
+                    table.name,
+                )
+
+        return fixed
+
+    @staticmethod
+    def _drop_existing_table(
+        context: BackupContext,
+        table: Table,
+        existing_table: Table,
+    ) -> None:
+        """
+        Drop an existing table, handling long table names and dictionaries.
+        """
+        ### If table name longer than `getMaxTableNameLengthForDatabase()` ch function result
+        ### then we can't drop the table. Just rename it to some random name and drop the table.
+        ### But for dictionaries doesn't works create/attach with long name, so we can't even restore the dictionary
+        ### with long name. So it better to keep it.
+        if existing_table.is_dictionary():
+            context.ch_ctl.drop_dictionary_if_exists(existing_table)
+        else:
+            ### The lightweight copy to that we can modify and use for ch queries
+            table_to_drop = Table.make_dummy(
+                existing_table.database,
+                existing_table.name,
+            )
+            if len(table.name) > context.config_root["restore"]["max_table_name"]:
+                new_table_name = "to_drop_" + "".join(
+                    choices(ascii_lowercase, k=RANDOM_TABLE_NAME_LENGTH)
+                )
+                table_to_drop.name = new_table_name
+                context.ch_ctl.drop_table_if_exists(table_to_drop)
+                context.ch_ctl.rename_table(existing_table, table_to_drop.name)
+
+            context.ch_ctl.drop_table_if_exists(table_to_drop)
 
     @staticmethod
     def _get_tables_from_meta(
