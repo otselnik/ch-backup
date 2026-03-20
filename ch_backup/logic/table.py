@@ -663,16 +663,17 @@ class TableBackup(BackupManager):
 
             drop_performed = False
 
-            if not existing_table:
-                result.append(table)
-            elif (
+            if (
                 databases[table.database].is_replicated_db_engine()
                 and not restore_tables_in_replicated_database
             ):
+                action = "drop" if existing_table else "restore"
                 logging.info(
-                    f"Skipping drop of table {table_name_for_logs} because it is in replicated database "
+                    f"Skipping {action} of table {table_name_for_logs} because it is in replicated database "
                     f"and --restore-tables-in-replicated-database flag is not set",
                 )
+            elif not existing_table:
+                result.append(table)
             else:
                 try:
                     self._drop_existing_table(context, table, existing_table)
@@ -682,18 +683,16 @@ class TableBackup(BackupManager):
                     if not keep_going:
                         raise
                     logging.exception(
-                        f"Drop of table {existing_table.name} was failed, skipping due to --keep-going flag. Reason {e}"
+                        f"Drop of table {existing_table.name} failed, skipping due to --keep-going flag. Reason: {e}"
                     )
                     continue
 
-            should_clean_metadata = (
+            if (
                 metadata_cleaner
                 and table.is_replicated()
                 and not drop_performed
                 and (table.database, table.name) not in readonly_cleaned_metadata
-            )
-
-            if should_clean_metadata:
+            ):
                 logging.debug(
                     f"Will clean ZooKeeper metadata for table {table_name_for_logs}"
                 )
