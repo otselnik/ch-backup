@@ -663,34 +663,37 @@ class TableBackup(BackupManager):
                     existing_table.create_statement,
                     table.create_statement,
                 )
-
             drop_performed = False
+            table_key = (table.database, table.name)
 
-            if existing_table:
-                if is_in_replicated_db and not restore_tables_in_replicated_database:
-                    logging.info(
-                        f"Skipping drop of table {table_name_for_logs} because it is in replicated database "
-                        f"and --restore-tables-in-replicated-database flag is not set",
+            if not existing_table:
+                result.append(table)
+            elif is_in_replicated_db and not restore_tables_in_replicated_database:
+                logging.info(
+                    f"Skipping drop of table {table_name_for_logs} because it is in replicated database "
+                    f"and --restore-tables-in-replicated-database flag is not set",
+                )
+            else:
+                try:
+                    self._drop_existing_table(context, table, existing_table)
+                    drop_performed = True
+                    result.append(table)
+                except Exception:
+                    if not keep_going:
+                        raise
+                    logging.exception(
+                        f"Drop of table {existing_table.name} failed, skipping due to --keep-going flag"
                     )
-                else:
-                    try:
-                        self._drop_existing_table(context, table, existing_table)
-                        drop_performed = True
-                        result.append(table)
-                    except Exception as e:
-                        if not keep_going:
-                            raise
-                        logging.exception(
-                            f"Drop of table {existing_table.name} failed, skipping due to --keep-going flag. Reason: {e}"
-                        )
-                        continue
+                    continue
 
-            if (
+            should_clean_metadata = (
                 metadata_cleaner
                 and table.is_replicated()
                 and not drop_performed
-                and (table.database, table.name) not in readonly_cleaned_metadata
-            ):
+                and table_key not in readonly_cleaned_metadata
+            )
+
+            if should_clean_metadata:
                 logging.debug(
                     f"Will clean ZooKeeper metadata for table {table_name_for_logs}"
                 )
