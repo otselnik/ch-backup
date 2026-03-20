@@ -616,8 +616,10 @@ class TableBackup(BackupManager):
             if table.uuid:
                 existing_tables_by_uuid[table.uuid] = table
 
-        existing_readonly_tables = self._get_remaining_readonly_tables_after_fix_attempt(
-            context, tables, metadata_cleaner
+        existing_readonly_tables = (
+            self._get_remaining_readonly_tables_after_fix_attempt(
+                context, tables, metadata_cleaner
+            )
         )
 
         result: List[Table] = []
@@ -663,10 +665,7 @@ class TableBackup(BackupManager):
                 )
 
             # For tables in replicated databases, skip unless explicitly requested.
-            if (
-                not restore_tables_in_replicated_database
-                and is_in_replicated_db
-            ):
+            if not restore_tables_in_replicated_database and is_in_replicated_db:
                 logging.info(
                     f"Skipping table {table_name_for_logs} because it is in replicated database and --restore-tables-in-replicated-database flag is not set",
                 )
@@ -721,7 +720,8 @@ class TableBackup(BackupManager):
         replicated_readonly_tables = [
             table
             for table in tables
-            if table.is_replicated() and (table.database, table.name) in existing_readonly_tables
+            if table.is_replicated()
+            and (table.database, table.name) in existing_readonly_tables
         ]
 
         if not replicated_readonly_tables:
