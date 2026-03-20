@@ -626,11 +626,9 @@ class TableBackup(BackupManager):
             table_name_for_logs = f'"{table.database}"."{table.name}"'
             is_in_replicated_db = databases[table.database].is_replicated_db_engine()
             existing_table: Optional[Table] = None
-            need_drop = False
 
             if (table.database, table.name) in existing_readonly_tables:
                 existing_table = table
-                need_drop = True
                 logging.warning(
                     f"Table {table_name_for_logs} will be recreated because it is in readonly state",
                 )
@@ -651,7 +649,6 @@ class TableBackup(BackupManager):
                     existing_table.create_statement,
                     table.create_statement,
                 )
-                need_drop = True
 
             elif existing_table := (
                 existing_tables_by_uuid.get(table.uuid) if table.uuid else None
@@ -664,7 +661,6 @@ class TableBackup(BackupManager):
                     existing_table.create_statement,
                     table.create_statement,
                 )
-                need_drop = True
 
             # For tables in replicated databases, skip unless explicitly requested.
             if (
@@ -676,7 +672,7 @@ class TableBackup(BackupManager):
                 )
                 continue
 
-            if need_drop and existing_table:
+            if existing_table:
                 try:
                     self._drop_existing_table(context, table, existing_table)
                 except Exception as e:
