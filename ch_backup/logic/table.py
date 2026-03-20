@@ -626,9 +626,7 @@ class TableBackup(BackupManager):
         tables_to_clean_metadata: List[Table] = []
         for table in tables:
             table_name_for_logs = f'"{table.database}"."{table.name}"'
-            is_in_replicated_db = databases[table.database].is_replicated_db_engine()
             existing_table: Optional[Table] = None
-
             if (table.database, table.name) in existing_readonly_tables:
                 existing_table = table
                 logging.warning(
@@ -651,7 +649,6 @@ class TableBackup(BackupManager):
                     existing_table.create_statement,
                     table.create_statement,
                 )
-
             elif existing_table := (
                 existing_tables_by_uuid.get(table.uuid) if table.uuid else None
             ):
@@ -663,12 +660,15 @@ class TableBackup(BackupManager):
                     existing_table.create_statement,
                     table.create_statement,
                 )
+
             drop_performed = False
-            table_key = (table.database, table.name)
 
             if not existing_table:
                 result.append(table)
-            elif is_in_replicated_db and not restore_tables_in_replicated_database:
+            elif (
+                databases[table.database].is_replicated_db_engine()
+                and not restore_tables_in_replicated_database
+            ):
                 logging.info(
                     f"Skipping drop of table {table_name_for_logs} because it is in replicated database "
                     f"and --restore-tables-in-replicated-database flag is not set",
@@ -678,11 +678,11 @@ class TableBackup(BackupManager):
                     self._drop_existing_table(context, table, existing_table)
                     drop_performed = True
                     result.append(table)
-                except Exception:
+                except Exception as e:
                     if not keep_going:
                         raise
                     logging.exception(
-                        f"Drop of table {existing_table.name} failed, skipping due to --keep-going flag"
+                        f"Drop of table {existing_table.name} was failed, skipping due to --keep-going flag. Reason {e}"
                     )
                     continue
 
@@ -690,7 +690,7 @@ class TableBackup(BackupManager):
                 metadata_cleaner
                 and table.is_replicated()
                 and not drop_performed
-                and table_key not in readonly_cleaned_metadata
+                and (table.database, table.name) not in readonly_cleaned_metadata
             )
 
             if should_clean_metadata:
