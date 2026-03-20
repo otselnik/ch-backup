@@ -616,26 +616,9 @@ class TableBackup(BackupManager):
             if table.uuid:
                 existing_tables_by_uuid[table.uuid] = table
 
-        existing_readonly_tables = {
-            (replica["database"], replica["table"])
-            for replica in context.ch_ctl.get_replicas(readonly=True)
-        }
-
-        if metadata_cleaner and existing_readonly_tables:
-            replicated_readonly_tables = []
-
-            for table in tables:
-                table_key = (table.database, table.name)
-                if table.is_replicated() and table_key in existing_readonly_tables:
-                    replicated_readonly_tables.append(table)
-
-            if replicated_readonly_tables:
-                existing_readonly_tables -= self._try_fix_readonly_tables(
-                    context,
-                    replicated_readonly_tables,
-                    metadata_cleaner,
-                )
-
+        existing_readonly_tables = self._get_remaining_readonly_tables_after_fix_attempt(
+            context, tables, metadata_cleaner
+        )
 
         result: List[Table] = []
         tables_to_clean_metadata: List[Table] = []
@@ -717,29 +700,45 @@ class TableBackup(BackupManager):
 
         return result
 
-    def _try_fix_readonly_tables(
+    def _get_remaining_readonly_tables_after_fix_attempt(
         self,
         context: BackupContext,
-        readonly_tables: List[Table],
-        metadata_cleaner: MetadataCleaner,
+        tables: List[Table],
+        metadata_cleaner: Optional[MetadataCleaner],
     ) -> Set[Tuple[str, str]]:
         """
-        Attempt to fix readonly replicated tables in-place by:
+        Find replicated tables that are in readonly state and attempt to fix them in-place by:
         1. Cleaning ZooKeeper metadata via MetadataCleaner
         2. Running SYSTEM RESTORE REPLICA
 
-        Returns a set of (database, table_name) tuples for tables that were
-        successfully fixed (no longer readonly after the operation).
-        Tables not present in the returned set are still readonly.
+        Returns a set of (database, table_name) tuples for tables that are still readonly
+        after the fix attempt (or all readonly tables if metadata_cleaner is not provided).
         """
+        existing_readonly_tables = {
+            (replica["database"], replica["table"])
+            for replica in context.ch_ctl.get_replicas(readonly=True)
+        }
+
+        if not metadata_cleaner or not existing_readonly_tables:
+            return existing_readonly_tables
+
+        replicated_readonly_tables = [
+            table
+            for table in tables
+            if table.is_replicated() and (table.database, table.name) in existing_readonly_tables
+        ]
+
+        if not replicated_readonly_tables:
+            return existing_readonly_tables
+
         logging.info(
             "Attempting to fix {} readonly table(s) via metadata cleanup + SYSTEM RESTORE REPLICA",
-            len(readonly_tables),
+            len(replicated_readonly_tables),
         )
 
-        metadata_cleaner.clean_tables_metadata(readonly_tables)
+        metadata_cleaner.clean_tables_metadata(replicated_readonly_tables)
 
-        for table in readonly_tables:
+        for table in replicated_readonly_tables:
             try:
                 logging.debug(
                     'Running SYSTEM RESTORE REPLICA for "{}"."{}"',
@@ -760,8 +759,7 @@ class TableBackup(BackupManager):
             for replica in context.ch_ctl.get_replicas(readonly=True)
         }
 
-        fixed: Set[Tuple[str, str]] = set()
-        for table in readonly_tables:
+        for table in replicated_readonly_tables:
             key = (table.database, table.name)
             if key not in still_readonly:
                 logging.info(
@@ -769,7 +767,7 @@ class TableBackup(BackupManager):
                     table.database,
                     table.name,
                 )
-                fixed.add(key)
+                existing_readonly_tables.discard(key)
             else:
                 logging.warning(
                     'Table "{}"."{}" is still readonly after fix attempt',
@@ -777,7 +775,7 @@ class TableBackup(BackupManager):
                     table.name,
                 )
 
-        return fixed
+        return existing_readonly_tables
 
     @staticmethod
     def _drop_existing_table(
