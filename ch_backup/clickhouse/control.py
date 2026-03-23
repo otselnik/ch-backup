@@ -273,6 +273,22 @@ SYNC_DATABASE_REPLICA_SQL = strip_query(
 """
 )
 
+GET_DDL_QUEUE_STATUS_SQL = strip_query(
+    """
+    SELECT
+        entry,
+        query,
+        status,
+        exception_code,
+        exception_text
+    FROM system.distributed_ddl_queue
+    WHERE cluster = '{db_name}'
+      AND status != 'Finished'
+    ORDER BY entry
+    FORMAT JSON
+"""
+)
+
 GET_DATABASES_SQL = strip_query(
     """
     SELECT
@@ -989,6 +1005,23 @@ class ClickhouseCTL:
             ),
             timeout=self._drop_replica_timeout,
         )
+
+    def get_ddl_queue_unfinished_status(self, db_name: str) -> List[Dict]:
+        """
+        Get pending DDL entries from system.distributed_ddl_queue for a replicated database.
+        Returns list of entries with status, exception_code and exception_text.
+        An empty list means all DDL entries have been processed (sync is complete).
+        """
+        try:
+            result = self._ch_client.query(
+                GET_DDL_QUEUE_STATUS_SQL.format(db_name=escape(db_name))
+            )
+            return result.get("data", [])
+        except Exception as e:
+            logging.warning(
+                f"Failed to query system.distributed_ddl_queue for database {db_name}: {e}"
+            )
+            return []
 
     def system_sync_database_replica(
         self,

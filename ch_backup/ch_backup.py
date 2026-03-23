@@ -26,7 +26,7 @@ from ch_backup.exceptions import (
     TerminatingSignal,
 )
 from ch_backup.logic.access import AccessBackup
-from ch_backup.logic.database import DatabaseBackup
+from ch_backup.logic.database import DatabaseBackup, SyncStatus
 from ch_backup.logic.named_collections import NamedCollectionsBackup
 from ch_backup.logic.partial_restore import PartialRestoreFilter
 from ch_backup.logic.table import TableBackup
@@ -596,9 +596,13 @@ class ClickhouseBackup:
                 metadata_cleaner,
             )
 
-            # Wait for replicated databases to sync
-            self._database_backup_manager.wait_sync_replicated_databases(
-                self._context, restored_databases, keep_going
+            # Wait for replicated databases to sync by tracking log_ptr in ZooKeeper.
+            # Returns sync status per database — STUCK means log_ptr is not advancing
+            # (e.g. REPLICA_ALREADY_EXISTS conflict) and needs table restore to fix it first.
+            # Always use keep_going=True here: STUCK is an expected intermediate state
+            # that will be retried after table restore below.
+            sync_results = self._database_backup_manager.wait_sync_replicated_databases(
+                self._context, restored_databases, keep_going=True
             )
 
             # Restore tables and data stored on local disks.
@@ -615,6 +619,24 @@ class ClickhouseBackup:
                 keep_going=keep_going,
                 restore_tables_in_replicated_database=restore_tables_in_replicated_database,
             )
+
+            # Retry sync for databases that were stuck during initial sync.
+            # After table restore, broken tables should be fixed and DDL worker
+            # should be able to proceed.
+            stuck_databases = [
+                db
+                for db in restored_databases
+                if sync_results.get(db.name) == SyncStatus.STUCK
+            ]
+            if stuck_databases:
+                logging.info(
+                    "Retrying sync for {} database(s) that were stuck: {}",
+                    len(stuck_databases),
+                    ", ".join(db.name for db in stuck_databases),
+                )
+                self._database_backup_manager.wait_sync_replicated_databases(
+                    self._context, stuck_databases, keep_going
+                )
 
             if sources.data and self._context.restore_context.has_failed_parts():
                 msg = "Some parts are failed to attach"
