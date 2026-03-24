@@ -36,6 +36,7 @@ DEFAULT_CONFIG = {
         "restore_replica_timeout": _as_seconds("30 min"),
         "sync_database_replica_timeout": _as_seconds("30 min"),
         "sync_database_replica_poll_interval": 10,
+        "sync_database_replica_stall_threshold": 6,
         "drop_replica_timeout": _as_seconds("1 hour"),
         "user": "clickhouse",
         "group": "clickhouse",

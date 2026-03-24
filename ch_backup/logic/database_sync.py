@@ -99,16 +99,9 @@ class DatabaseZookeeperData:
         """
         Resolve ZooKeeper parameters for a replicated database and load max_log_ptr.
         Raises RuntimeError if ZK parameters cannot be resolved.
-
-        The engine_full is fetched directly from ClickHouse (system.databases) rather
-        than from backup metadata, so it always reflects the actual ZK path, shard and
-        replica registered on the current host after restore.
         """
         macros = context.ch_ctl.get_macros()
 
-        # Fetch the live database record from ClickHouse so that engine_full contains
-        # the actual replica name on this host (which may differ from the backup source
-        # when override_replica_name was used during restore).
         live_databases = {d.name: d for d in context.ch_ctl.get_databases()}
         live_db = live_databases.get(db.name)
         if live_db is None:
@@ -138,10 +131,12 @@ def _sync_database(context: BackupContext, db: Database, deadline: float) -> Non
     """
     cfg = context.ch_ctl_conf
     poll_interval = cfg["sync_database_replica_poll_interval"]
+    stall_threshold = cfg["sync_database_replica_stall_threshold"]
 
     zk_data = DatabaseZookeeperData.resolve(context, db)
 
     prev_log_ptr = log_ptr = zk_data.get_log_ptr()
+    stall_count = 0
 
     while max(int(deadline - time.time()), 0) > 0:
         if log_ptr >= zk_data.max_log_ptr:
@@ -152,14 +147,24 @@ def _sync_database(context: BackupContext, db: Database, deadline: float) -> Non
             return
 
         if log_ptr == prev_log_ptr:
+            stall_count += 1
             if _check_ddl_queue_for_errors(context, db.name):
                 raise RuntimeError(
                     f"Database {db.name}: log_ptr={log_ptr} not advancing "
                     f"and DDL queue has errors"
                 )
+            if stall_count >= stall_threshold:
+                raise RuntimeError(
+                    f"Database {db.name}: log_ptr={log_ptr} not advancing for "
+                    f"{stall_count} consecutive polls (stall_threshold={stall_threshold}), "
+                    f"max_log_ptr={zk_data.max_log_ptr}"
+                )
+        else:
+            stall_count = 0
 
         logging.debug(
-            f"Database {db.name}: log_ptr={log_ptr}, max_log_ptr={zk_data.max_log_ptr}"
+            f"Database {db.name}: log_ptr={log_ptr}, max_log_ptr={zk_data.max_log_ptr}, "
+            f"stall_count={stall_count}"
         )
 
         time.sleep(poll_interval)
