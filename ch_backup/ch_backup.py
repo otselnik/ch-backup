@@ -175,7 +175,7 @@ class ClickhouseBackup:
                 self._context.backup_meta
             )
             logging.debug(
-                'Starting backup "{}" for databases: {}',
+                'Starting backup "%s" for databases: %s',
                 self._context.backup_meta.name,
                 ", ".join(map(lambda db: db.name, databases)),
             )
@@ -276,7 +276,7 @@ class ClickhouseBackup:
             ]
             if missed_databases:
                 logging.critical(
-                    "Required databases {} were not found in backup metadata: {}",
+                    "Required databases %s were not found in backup metadata: %s",
                     ", ".join(missed_databases),
                     self._context.backup_meta.path,
                 )
@@ -400,13 +400,13 @@ class ClickhouseBackup:
             # Use light metadata in backups iteration to avoid high memory usage.
             for backup in self._context.backup_layout.get_backups(use_light_meta=True):
                 if backup.name not in backup_names:
-                    logging.info("Deleting backup without metadata: {}", backup.name)
+                    logging.info("Deleting backup without metadata: %s", backup.name)
                     self._context.backup_layout.delete_backup(backup.name)
                     continue
 
                 if retain_count > 0:
                     logging.info(
-                        "Preserving backup per retain count policy: {}, state {}",
+                        "Preserving backup per retain count policy: %s, state %s",
                         backup.name,
                         backup.state,
                     )
@@ -417,7 +417,7 @@ class ClickhouseBackup:
 
                 if retain_time_limit and backup.start_time >= retain_time_limit:
                     logging.info(
-                        "Preserving backup per retain time policy: {}, state {}",
+                        "Preserving backup per retain time policy: %s, state %s",
                         backup.name,
                         backup.state,
                     )
@@ -479,7 +479,7 @@ class ClickhouseBackup:
         self, backup_light_meta: BackupMetadata, dedup_references: DedupReferences
     ) -> Tuple[Optional[str], Optional[str]]:
         logging.info(
-            "Deleting backup {}, state: {}",
+            "Deleting backup %s, state: %s",
             backup_light_meta.name,
             backup_light_meta.state,
         )
@@ -629,9 +629,7 @@ class ClickhouseBackup:
             ]
             if failed_databases:
                 logging.info(
-                    "Retrying sync for {} database(s) that failed: {}",
-                    len(failed_databases),
-                    ", ".join(db.name for db in failed_databases),
+                    f"Retrying sync for {len(failed_databases)} database(s) that failed: {', '.join(db.name for db in failed_databases)}"
                 )
                 wait_sync_replicated_databases(
                     self._context, failed_databases, keep_going
