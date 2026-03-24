@@ -267,12 +267,6 @@ DROP_DATABASE_REPLICA_BY_ZK_PATH_SQL = strip_query(
 """
 )
 
-SYNC_DATABASE_REPLICA_SQL = strip_query(
-    """
-    SYSTEM SYNC DATABASE REPLICA `{db_name}`
-"""
-)
-
 GET_DDL_QUEUE_STATUS_SQL = strip_query(
     """
     SELECT
@@ -534,9 +528,6 @@ class ClickhouseCTL:
         self._freeze_timeout = self._ch_ctl_config["freeze_timeout"]
         self._unfreeze_timeout = self._ch_ctl_config["unfreeze_timeout"]
         self._restore_replica_timeout = self._ch_ctl_config["restore_replica_timeout"]
-        self._sync_database_replica_timeout = self._ch_ctl_config[
-            "sync_database_replica_timeout"
-        ]
         self._drop_replica_timeout = self._ch_ctl_config["drop_replica_timeout"]
         self._ch_client = ClickhouseClient(self._ch_ctl_config)
         self._ch_version = self._ch_client.query(GET_VERSION_SQL)
@@ -1022,29 +1013,6 @@ class ClickhouseCTL:
                 f"Failed to query system.distributed_ddl_queue for database {db_name}: {e}"
             )
             return []
-
-    def system_sync_database_replica(
-        self,
-        db_name: str,
-        timeout: Optional[int] = None,
-        settings: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """
-        Synchronize Replicated Database replica.
-        """
-        if not self.ch_version_ge("23.8"):
-            raise RuntimeError(
-                "SYSTEM SYNC DATABASE REPLICA is not stable in ClickHouse version < 23.8"
-            )
-
-        query_timeout = timeout or self._sync_database_replica_timeout
-        query_settings = settings or {}
-
-        self._ch_client.query(
-            SYNC_DATABASE_REPLICA_SQL.format(db_name=escape(db_name)),
-            timeout=query_timeout,
-            settings=query_settings,
-        )
 
     def get_database_metadata_path(self, database: str) -> str:
         """
