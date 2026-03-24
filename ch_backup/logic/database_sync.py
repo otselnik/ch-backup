@@ -4,6 +4,7 @@ Module responsible for waiting on replicated database synchronization.
 
 from __future__ import annotations
 
+import posixpath
 import re
 import time
 from dataclasses import dataclass, field
@@ -56,7 +57,11 @@ class DatabaseZookeeperData:
             return int(data.decode("utf-8").strip())
 
     def _full_path(self, suffix: str) -> str:
-        return f"{self._zk_root_path}{self.zk_path}{suffix}"
+        # Use posixpath.join to correctly handle zk_path with or without leading '/'.
+        # Simple string concatenation like f"{root}{path}" fails when path has no
+        # leading '/', producing invalid paths like '/clickhouse02some/path/db'.
+        full = posixpath.join(self._zk_root_path, self.zk_path.lstrip("/")) + suffix
+        return full
 
     def get_log_ptr(self) -> int:
         """Read log_ptr for this database replica."""
@@ -94,12 +99,27 @@ class DatabaseZookeeperData:
         """
         Resolve ZooKeeper parameters for a replicated database and load max_log_ptr.
         Raises RuntimeError if ZK parameters cannot be resolved.
+
+        The engine_full is fetched directly from ClickHouse (system.databases) rather
+        than from backup metadata, so it always reflects the actual ZK path, shard and
+        replica registered on the current host after restore.
         """
         macros = context.ch_ctl.get_macros()
-        zk_path, shard, replica = cls.parse_replicated_db_zk_info(db, macros)
+
+        # Fetch the live database record from ClickHouse so that engine_full contains
+        # the actual replica name on this host (which may differ from the backup source
+        # when override_replica_name was used during restore).
+        live_databases = {d.name: d for d in context.ch_ctl.get_databases()}
+        live_db = live_databases.get(db.name)
+        if live_db is None:
+            raise RuntimeError(
+                f"Database {db.name}: not found in ClickHouse, cannot resolve ZK path."
+            )
+
+        zk_path, shard, replica = cls.parse_replicated_db_zk_info(live_db, macros)
 
         logging.debug(
-            f"Database {db.name}: ZK path={zk_path}, shard={shard}, replica={replica}."
+            f"Database {db.name}: ZK path={zk_path!r}, shard={shard!r}, replica={replica!r}."
         )
 
         zk_data = cls(
