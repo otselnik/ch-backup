@@ -317,7 +317,6 @@ Feature: Backup and restore Replicated Database with synchronization
     """
     allow_experimental_database_replicated: 1
     """
-    # Create Replicated Database on both nodes using the same ZK path
     And we have executed queries on clickhouse01
     """
     CREATE DATABASE test_replicated_db
@@ -328,7 +327,6 @@ Feature: Backup and restore Replicated Database with synchronization
     CREATE DATABASE test_replicated_db
     ENGINE = Replicated('/clickhouse/databases/test_db', '{shard}', '{replica}');
     """
-    # Create table with fixed UUID on clickhouse01 - it will be replicated to clickhouse02
     And we have executed queries on clickhouse01
     """
     CREATE TABLE test_replicated_db.test_table UUID '82aa76a0-45cd-42f2-b355-852cc8c9c0af' (id UInt32, name String)
@@ -336,17 +334,14 @@ Feature: Backup and restore Replicated Database with synchronization
 
     INSERT INTO test_replicated_db.test_table VALUES (1, 'one'), (2, 'two'), (3, 'three');
     """
-    # Wait for table DDL to replicate to clickhouse02 via Replicated Database
     When we execute query on clickhouse02
     """
     SYSTEM SYNC DATABASE REPLICA test_replicated_db
     """
-    # Wait for data to replicate to clickhouse02 via ReplicatedMergeTree
     When we execute query on clickhouse02
     """
     SYSTEM SYNC REPLICA test_replicated_db.test_table
     """
-    # Verify data is synced to clickhouse02
     When we execute query on clickhouse02
     """
     SELECT count() FROM test_replicated_db.test_table
@@ -355,18 +350,12 @@ Feature: Backup and restore Replicated Database with synchronization
     """
     3
     """
-    # Create backup on clickhouse01
     When we create clickhouse01 clickhouse backup
     Then we got the following backups on clickhouse01
       | num | state   | data_count | link_count |
       | 0   | created | 3          | 0          |
-    # Delete ZK replica metadata for the table on clickhouse02 to simulate readonly state after restart.
-    # This reproduces the race condition described in the bug report:
-    # table is added by the database but not yet activated by the restart thread.
     When on zookeeper01 we delete /shared/clickhouse/tables/82aa76a0-45cd-42f2-b355-852cc8c9c0af/shard1/replicas/clickhouse02
-    # Restart clickhouse02 - table becomes readonly because replica metadata is missing in ZK
     When we restart clickhouse on clickhouse02
-    # Verify table is in readonly state on clickhouse02
     When we execute query on clickhouse02
     """
     SELECT is_readonly FROM system.replicas
@@ -376,16 +365,11 @@ Feature: Backup and restore Replicated Database with synchronization
     """
     1
     """
-    # Restore backup to clickhouse02 WITHOUT restore_tables_in_replicated_database flag.
-    # This is the scenario that previously caused data loss on other replicas:
-    # the readonly table was being dropped via replicated database DROP,
-    # which propagated to all replicas including clickhouse01.
     When we restore clickhouse backup #0 to clickhouse02
     """
     restore_tables_in_replicated_database: false
     schema_only: true
     """
-    # CRITICAL CHECK: data on clickhouse01 must NOT be lost after the restore
     When we execute query on clickhouse01
     """
     SELECT count() FROM test_replicated_db.test_table
@@ -394,7 +378,6 @@ Feature: Backup and restore Replicated Database with synchronization
     """
     3
     """
-    # Table must still exist on clickhouse02 after the restore
     When we execute query on clickhouse02
     """
     SELECT count() FROM system.tables
