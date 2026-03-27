@@ -387,6 +387,15 @@ Feature: Backup and restore Replicated Database with synchronization
     """
     1
     """
+    When we execute query on clickhouse02
+    """
+    SELECT is_readonly FROM system.replicas
+    WHERE database = 'test_replicated_db' AND table = 'test_table'
+    """
+    Then we get response
+    """
+    0
+    """
 
     @require_version_23.8
     @require_version_less_than_25.3
