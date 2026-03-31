@@ -272,9 +272,19 @@ DROP_DATABASE_REPLICA_BY_ZK_PATH_SQL = strip_query(
 """
 )
 
-SYNC_DATABASE_REPLICA_SQL = strip_query(
+GET_DDL_QUEUE_STATUS_SQL = strip_query(
     """
-    SYSTEM SYNC DATABASE REPLICA `{db_name}`
+    SELECT
+        entry,
+        query,
+        status,
+        exception_code,
+        exception_text
+    FROM system.distributed_ddl_queue
+    WHERE cluster = '{db_name}'
+      AND status != 'Finished'
+    ORDER BY entry
+    FORMAT JSON
 """
 )
 
@@ -577,9 +587,6 @@ class ClickhouseCTL:
         self._freeze_timeout = self._ch_ctl_config["freeze_timeout"]
         self._unfreeze_timeout = self._ch_ctl_config["unfreeze_timeout"]
         self._restore_replica_timeout = self._ch_ctl_config["restore_replica_timeout"]
-        self._sync_database_replica_timeout = self._ch_ctl_config[
-            "sync_database_replica_timeout"
-        ]
         self._drop_replica_timeout = self._ch_ctl_config["drop_replica_timeout"]
         self._ch_client = ClickhouseClient(self._ch_ctl_config)
         self._ch_version = self._ch_client.query(GET_VERSION_SQL)
@@ -1111,28 +1118,22 @@ class ClickhouseCTL:
             timeout=self._drop_replica_timeout,
         )
 
-    def system_sync_database_replica(
-        self,
-        db_name: str,
-        timeout: Optional[int] = None,
-        settings: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    def get_ddl_queue_unfinished_status(self, db_name: str) -> List[Dict]:
         """
-        Synchronize Replicated Database replica.
+        Get pending DDL entries from system.distributed_ddl_queue for a replicated database.
+        Returns list of entries with status, exception_code and exception_text.
+        An empty list means all DDL entries have been processed (sync is complete).
         """
-        if not self.ch_version_ge("23.8"):
-            raise RuntimeError(
-                "SYSTEM SYNC DATABASE REPLICA is not stable in ClickHouse version < 23.8"
+        try:
+            result = self._ch_client.query(
+                GET_DDL_QUEUE_STATUS_SQL.format(db_name=escape(db_name))
             )
-
-        query_timeout = timeout or self._sync_database_replica_timeout
-        query_settings = settings or {}
-
-        self._ch_client.query(
-            SYNC_DATABASE_REPLICA_SQL.format(db_name=escape(db_name)),
-            timeout=query_timeout,
-            settings=query_settings,
-        )
+            return result.get("data", [])
+        except Exception as e:
+            logging.warning(
+                f"Failed to query system.distributed_ddl_queue for database {db_name}: {e}"
+            )
+            return []
 
     def get_database_metadata_path(self, database: str) -> str:
         """
