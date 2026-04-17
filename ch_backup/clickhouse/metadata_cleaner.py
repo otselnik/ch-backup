@@ -5,9 +5,10 @@ Zookeeper metadata cleaner for clickhouse.
 import copy
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from kazoo.exceptions import NoNodeError
+from kazoo.exceptions import KazooException, NoNodeError
 
 from ch_backup import logging
 from ch_backup.clickhouse.client import ClickhouseError
@@ -20,6 +21,41 @@ from ch_backup.util import (
     replace_macros,
 )
 from ch_backup.zookeeper.zookeeper import ZookeeperCTL
+
+
+@dataclass
+class _TableCleanupTask:
+    """Holds a scheduled cleanup future together with its ZooKeeper path."""
+
+    future: Future
+    zk_path: str
+
+
+def _is_table_was_not_dropped_error(error: ClickhouseError) -> bool:
+    """
+    Detect ClickHouse TABLE_WAS_NOT_DROPPED errors.
+
+    Prefer using structured attributes (e.g., error.code or error.type) if available.
+    Message-based matching is kept as a fallback to avoid tight coupling to wording.
+    """
+    # Structured detection (extend this if ClickHouse exposes specific codes/types)
+    code = getattr(error, "code", None)
+    if code is not None:
+        # TODO: replace with the concrete TABLE_WAS_NOT_DROPPED code when known.
+        table_was_not_dropped_codes: set = set()
+        if code in table_was_not_dropped_codes:
+            return True
+
+    # Fallback to message-based matching
+    message = str(error)
+    return "TABLE_WAS_NOT_DROPPED" in message or "There is a local table" in message
+
+
+def _is_not_table_path_error(error: ClickhouseError) -> bool:
+    """
+    Detect ClickHouse errors indicating the ZK path does not look like a table path.
+    """
+    return "does not look like a table path" in str(error)
 
 
 def select_replica_drop(replica_name: Optional[str], macros: Dict) -> str:
@@ -61,52 +97,39 @@ class MetadataCleaner:
         """
         replicated_table_paths = get_table_zookeeper_paths(replicated_tables)
         # Key is "{table_name}/{replica}" to correctly handle multiple replicas per table.
-        tasks: Dict[str, Future] = {}
-        zk_paths: Dict[str, str] = {}
+        cleanup_tasks: Dict[str, _TableCleanupTask] = {}
         for table, table_path in replicated_table_paths:
-            self._schedule_table_replicas_cleanup(table, table_path, tasks, zk_paths)
+            self._schedule_table_replicas_cleanup(table, table_path, cleanup_tasks)
 
-        for task_key, future in tasks.items():
+        for task_key, task in cleanup_tasks.items():
             full_table_name = task_key.rsplit("/", 1)[0]
             try:
-                future.result()
+                task.future.result()
                 logging.debug(
                     "Successful zk metadata cleanup for table {}", full_table_name
                 )
             except ClickhouseError as ch_error:
-                error_message = str(ch_error)
-                # Check if it's the TABLE_WAS_NOT_DROPPED error
-                if (
-                    "TABLE_WAS_NOT_DROPPED" in error_message
-                    or "There is a local table" in error_message
-                ):
+                if _is_table_was_not_dropped_error(ch_error):
                     logging.warning(
-                        "System drop replica failed with TABLE_WAS_NOT_DROPPED for table {}. "
+                        "System drop replica failed for table {} because a local table "
+                        "still exists (TABLE_WAS_NOT_DROPPED or 'There is a local table'). "
                         "Falling back to direct ZK node deletion.",
                         full_table_name,
                     )
-                    # Fallback to direct ZK deletion
-                    zk_path = zk_paths.get(task_key)
-                    if zk_path is None:
-                        logging.error(
-                            "Cannot perform fallback ZK deletion for table {}: ZK path not found",
-                            full_table_name,
-                        )
-                        raise
                     try:
-                        self._delete_replica_zk_nodes(zk_path)
+                        self._delete_replica_zk_nodes(task.zk_path)
                         logging.debug(
                             "Successful fallback ZK metadata cleanup for table {}",
                             full_table_name,
                         )
-                    except Exception as fallback_error:
+                    except KazooException as fallback_error:
                         logging.error(
                             "Fallback ZK deletion failed for table {}: {}",
                             full_table_name,
                             repr(fallback_error),
                         )
                         raise
-                elif "does not look like a table path" in error_message:
+                elif _is_not_table_path_error(ch_error):
                     logging.warning(
                         "System drop replica failed with: {}\n Will ignore it, probably different configuration for zookeeper or tables schema.",
                         repr(ch_error),
@@ -118,12 +141,11 @@ class MetadataCleaner:
         self,
         table: Table,
         table_path: str,
-        tasks: Dict[str, Future],
-        zk_paths: Dict[str, str],
+        cleanup_tasks: Dict[str, _TableCleanupTask],
     ) -> None:
         """
         Schedule ZK metadata cleanup tasks for all replicas of a single table.
-        Populates tasks and zk_paths dicts with per-replica entries.
+        Populates cleanup_tasks dict with per-replica entries.
         """
         table_macros = copy.copy(self._macros)
         macros_to_override = dict(
@@ -174,11 +196,13 @@ class MetadataCleaner:
                     replica,
                 )
                 task_key = f"{full_table_name}/{replica}"
-                zk_paths[task_key] = full_table_zk_path
-                tasks[task_key] = self._exec_pool.submit(
-                    self._ch_ctl.system_drop_replica,
-                    replica,
-                    path_resolved,
+                cleanup_tasks[task_key] = _TableCleanupTask(
+                    future=self._exec_pool.submit(
+                        self._ch_ctl.system_drop_replica,
+                        replica,
+                        path_resolved,
+                    ),
+                    zk_path=full_table_zk_path,
                 )
 
     def _delete_replica_zk_nodes(self, zk_path: str) -> None:
