@@ -559,6 +559,7 @@ class BackupLayout:
 
         os.makedirs(fs_part_path, exist_ok=True)
 
+        # See PartMetadata.link for the semantics of part.link.
         remote_dir_path = self._get_escaped_if_exists(
             _part_path,
             part.link or self.get_backup_path(backup_meta.name),
@@ -602,6 +603,7 @@ class BackupLayout:
         Check availability of part data in storage.
         """
         try:
+            # See PartMetadata.link for the semantics of part.link.
             remote_dir_path = self._get_escaped_if_exists(
                 _part_path,
                 part.link or backup_path,
@@ -647,18 +649,15 @@ class BackupLayout:
         source_disk_name: str,
         compression: bool,
     ) -> Sequence[str]:
+        backup_path = self.get_backup_path(backup_name)
         # Check if metadata is stored as 'disks/s3.tar.gz' for backwards compatibility
         old_style_remote_path = _disk_metadata_path(
-            self.get_backup_path(backup_name), None, None, source_disk_name, compression
+            backup_path, None, None, source_disk_name, compression
         )
         if self._storage_loader.path_exists(old_style_remote_path):
             return [old_style_remote_path]
         return self._storage_loader.list_dir(
-            str(
-                os.path.join(
-                    self.get_backup_path(backup_name), "disks", source_disk_name
-                )
-            ),
+            str(os.path.join(backup_path, "disks", source_disk_name)),
             recursive=True,
             absolute=True,
         )
@@ -756,11 +755,13 @@ class BackupLayout:
         if not parts:
             return
 
+        backup_path = self.get_backup_path(backup_meta.name)
         deleting_files: List[str] = []
         for part in parts:
+            # See PartMetadata.link for the semantics of part.link.
             part_path = self._get_escaped_if_exists(
                 _part_path,
-                part.link or self.get_backup_path(backup_meta.name),
+                part.link or backup_path,
                 part.database,
                 part.table,
                 part.name,

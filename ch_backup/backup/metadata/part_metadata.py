@@ -87,7 +87,9 @@ class PartMetadata(Slotted):
     @property
     def link(self) -> Optional[str]:
         """
-        For deduplicated data parts it returns link to the source backup (its path). Otherwise None is returned.
+        For deduplicated data parts returns the resolved path to the source backup
+        (same format as ``BackupLayout.get_backup_path()``). For non-deduplicated
+        parts returns None.
         """
         return self.raw_metadata.link
 
