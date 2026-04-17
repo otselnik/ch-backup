@@ -331,7 +331,9 @@ class BackupLayout:
         """
         Download named collection create statement.
         """
-        remote_path = _named_collections_data_path(self.get_backup_path(backup_meta.name), filename)
+        remote_path = _named_collections_data_path(
+            self.get_backup_path(backup_meta.name), filename
+        )
         return self._storage_loader.download_data(remote_path, encryption=True)
 
     def get_backup_names(self) -> Sequence[str]:
@@ -463,7 +465,9 @@ class BackupLayout:
         """
         Download and return table create statement.
         """
-        remote_path = _table_metadata_path(self.get_backup_path(backup_meta.name), db_name, table_name)
+        remote_path = _table_metadata_path(
+            self.get_backup_path(backup_meta.name), db_name, table_name
+        )
         data = self._storage_loader.download_data(
             remote_path, encryption=backup_meta.encrypted, encoding=None
         )
@@ -475,7 +479,9 @@ class BackupLayout:
         """
         Download and return table create statements.
         """
-        remote_path = _table_metadata_path_tar(self.get_backup_path(backup_meta.name), db_name)
+        remote_path = _table_metadata_path_tar(
+            self.get_backup_path(backup_meta.name), db_name
+        )
         if not self._storage_loader.path_exists(remote_path):
             logging.debug(
                 f"File {remote_path} doesn't exist, fallback to old metadata style"
