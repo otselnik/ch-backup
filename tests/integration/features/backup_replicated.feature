@@ -1070,6 +1070,9 @@ Feature: Backup replicated merge tree table
   ## Setup: table exists on clickhouse02 with ZK replica node present but corrupted (empty),
   ## so the table is in readonly state. SYSTEM DROP REPLICA FROM ZKPATH fails because the table
   ## exists locally, triggering the ZK client fallback.
+  ## Note: In CH < 23.3, SYSTEM RESTART REPLICA with a corrupted (empty) ZK replica node crashes
+  ## instead of transitioning the table to is_readonly=1, so this scenario requires CH >= 23.9.
+  @require_version_23.3
   Scenario: Restore readonly table when SYSTEM DROP REPLICA fails with TABLE_WAS_NOT_DROPPED
     Given we have executed queries on clickhouse01
     """
