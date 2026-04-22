@@ -560,13 +560,24 @@ class BackupLayout:
         os.makedirs(fs_part_path, exist_ok=True)
 
         # See PartMetadata.link for the semantics of part.link.
+        backup_path = self._resolve_part_backup_path(backup_meta.name, part.link)
         remote_dir_path = self._get_escaped_if_exists(
             _part_path,
-            part.link or self.get_backup_path(backup_meta.name),
+            backup_path,
             part.database,
             part.table,
             part.name,
         )
+        if part.link:
+            logging.debug(
+                'Resolved deduplicated part link for "{}"."{}" part {}: raw_link={}, backup_path={}, remote_dir_path={}',
+                part.database,
+                part.table,
+                part.name,
+                part.link,
+                backup_path,
+                remote_dir_path,
+            )
 
         if part.tarball:
             remote_path = os.path.join(remote_dir_path, f"{part.name}.tar")
@@ -604,9 +615,10 @@ class BackupLayout:
         """
         try:
             # See PartMetadata.link for the semantics of part.link.
+            resolved_backup_path = self._resolve_part_backup_path(None, part.link, backup_path)
             remote_dir_path = self._get_escaped_if_exists(
                 _part_path,
-                part.link or backup_path,
+                resolved_backup_path,
                 part.database,
                 part.table,
                 part.name,
@@ -759,9 +771,10 @@ class BackupLayout:
         deleting_files: List[str] = []
         for part in parts:
             # See PartMetadata.link for the semantics of part.link.
+            resolved_backup_path = self._resolve_part_backup_path(None, part.link, backup_path)
             part_path = self._get_escaped_if_exists(
                 _part_path,
-                part.link or backup_path,
+                resolved_backup_path,
                 part.database,
                 part.table,
                 part.name,
@@ -832,6 +845,43 @@ class BackupLayout:
         if self._storage_loader.path_exists(path, is_dir=True):
             return path
         return path_function(*args, escape_names=False, **kwargs)
+
+    def _resolve_part_backup_path(
+        self,
+        backup_name: Optional[str],
+        part_link: Optional[str],
+        default_backup_path: Optional[str] = None,
+    ) -> str:
+        """
+        Resolve backup path for a part, normalizing historical malformed links.
+        """
+        if not part_link:
+            if default_backup_path:
+                return default_backup_path
+            assert backup_name is not None
+            return self.get_backup_path(backup_name)
+
+        path_root = self._config["path_root"]
+        if not path_root:
+            return part_link
+
+        normalized_root = path_root.strip("/")
+        normalized_link = part_link.strip("/")
+
+        if normalized_link == normalized_root or normalized_link.startswith(
+            normalized_root + "/"
+        ):
+            return normalized_link
+
+        root_marker = f"/{normalized_root}/"
+        if root_marker in f"/{normalized_link}":
+            _, suffix = normalized_link.split(f"{normalized_root}/", 1)
+            return f"{normalized_root}/{suffix}"
+
+        if "/" not in normalized_link:
+            return self.get_backup_path(normalized_link)
+
+        return normalized_link
 
 
 def _access_control_data_path(backup_path: str, file_name: str) -> str:
