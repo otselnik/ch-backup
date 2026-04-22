@@ -84,7 +84,10 @@ class TestBackupMetadata:
             hostname="clickhouse01.test_net_711",
         )
 
+        dump = backup.dump()
         assert backup.dump_json().find(" ") == -1
+        # Deprecated `path` field must not be emitted anymore
+        assert "path" not in dump["meta"]
 
     @pytest.mark.parametrize(
         "access_control",
@@ -265,6 +268,9 @@ class TestPartMetadata:
         "tarball": False,
         "disk_name": "default",
         "encrypted": True,
+        "database": "test_db",
+        "table": "test_table",
+        "name": "20181017T210300",
     }
 
     @pytest.mark.parametrize(
@@ -276,6 +282,8 @@ class TestPartMetadata:
             ("ch_backup/20181017T210300", "20181017T210300"),
             # Old format: absolute path.
             ("/srv/backups/20181017T210300", "20181017T210300"),
+            # Nested path with trailing slash — must reduce to last component.
+            ("/srv/backups/daily/20181017T210300/", "20181017T210300"),
             # No link (non-deduplicated part).
             (None, None),
             # Empty string treated as no link.
@@ -287,7 +295,17 @@ class TestPartMetadata:
         PartMetadata.load() must normalise the ``link`` field to a plain
         backup name regardless of whether it was stored as a full path
         (old format) or already as a name (new format).
+
+        Also asserts that non-link fields are preserved unchanged.
         """
         raw = {**self._BASE_RAW, "link": raw_link}
         part = PartMetadata.load("db1", "table1", "part1", raw)
+
+        # link normalization
         assert part.link == expected_link
+
+        # non-link fields must be preserved
+        assert part.database == "db1"
+        assert part.table == "table1"
+        assert part.name == "part1"
+        assert part.files == raw["files"]

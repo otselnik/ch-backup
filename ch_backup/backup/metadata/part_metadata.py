@@ -126,8 +126,8 @@ class PartMetadata(Slotted):
         backup name.  ``os.path.basename`` transparently converts both formats
         to a plain backup name.
         """
-        raw_link = raw_metadata["link"]
-        link = os.path.basename(raw_link) if raw_link else None
+        raw_link = raw_metadata.get("link")
+        link = os.path.basename(raw_link.rstrip("/")) if raw_link else None
         return cls(
             database=db_name,
             table=table_name,
