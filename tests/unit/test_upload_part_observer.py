@@ -17,7 +17,6 @@ ENGINE = "MergeTree"
 BACKUP_NAME = "TestBackup"
 BACKUP_META = BackupMetadata(
     name=BACKUP_NAME,
-    path=f"ch_backup/{BACKUP_NAME}",
     version="1.0.100",
     ch_version="19.1.16",
     time_format="%Y-%m-%dT%H:%M:%S%Z",

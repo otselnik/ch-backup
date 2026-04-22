@@ -41,7 +41,6 @@ class BackupMetadata:
     def __init__(
         self,
         name: str,
-        path: str,
         version: str,
         ch_version: str,
         time_format: str,
@@ -51,7 +50,6 @@ class BackupMetadata:
         encrypted: bool = True,
     ) -> None:
         self.name = name
-        self.path = path
         self.version = version
         self.ch_version = ch_version
         self.hostname = hostname or socket.getfqdn()
@@ -131,7 +129,6 @@ class BackupMetadata:
             "cloud_storage": self.cloud_storage.dump(),
             "meta": {
                 "name": self.name,
-                "path": self.path,
                 "version": self.version,
                 "ch_version": self.ch_version,
                 "hostname": self.hostname,
@@ -229,7 +226,6 @@ class BackupMetadata:
 
             backup = cls.__new__(cls)
             backup.name = meta["name"]
-            backup.path = meta["path"]
             backup.hostname = meta["hostname"]
             backup.time_format = meta["time_format"]
             backup._databases = data["databases"]

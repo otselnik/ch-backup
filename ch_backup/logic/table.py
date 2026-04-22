@@ -547,7 +547,7 @@ class TableBackup(BackupManager):
 
             for part in uploaded_parts:
                 if not context.backup_layout.check_data_part(
-                    context.backup_layout.get_backup_path(context.backup_meta.name),
+                    context.backup_meta.name,
                     part,
                 ):
                     invalid_parts.append(part)

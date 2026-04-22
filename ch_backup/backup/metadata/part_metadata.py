@@ -2,6 +2,7 @@
 Backup metadata for ClickHouse data part.
 """
 
+import os
 from typing import Optional, Sequence
 
 from ch_backup.clickhouse.models import FrozenPart
@@ -22,8 +23,8 @@ class RawMetadata(Slotted):
         size: int,
         files: Sequence[str],
         tarball: bool,
-        link: str = None,
-        disk_name: str = None,
+        link: Optional[str] = None,
+        disk_name: Optional[str] = None,
         encrypted: bool = True,
     ) -> None:
         self.checksum = checksum
@@ -52,8 +53,8 @@ class PartMetadata(Slotted):
         size: int,
         files: Sequence[str],
         tarball: bool,
-        link: str = None,
-        disk_name: str = None,
+        link: Optional[str] = None,
+        disk_name: Optional[str] = None,
         encrypted: bool = True,
     ) -> None:
         self.database: str = database
@@ -87,9 +88,8 @@ class PartMetadata(Slotted):
     @property
     def link(self) -> Optional[str]:
         """
-        For deduplicated data parts returns the resolved path to the source backup
-        (same format as ``BackupLayout.get_backup_path()``). For non-deduplicated
-        parts returns None.
+        For deduplicated data parts returns the name of the source backup.
+        For non-deduplicated parts returns None.
         """
         return self.raw_metadata.link
 
@@ -120,7 +120,14 @@ class PartMetadata(Slotted):
     ) -> "PartMetadata":
         """
         Deserialize data part metadata.
+
+        Normalizes the ``link`` field: old backups stored a full storage path
+        (e.g. ``/srv/backups/20181017T210300``); new backups store just the
+        backup name.  ``os.path.basename`` transparently converts both formats
+        to a plain backup name.
         """
+        raw_link = raw_metadata["link"]
+        link = os.path.basename(raw_link) if raw_link else None
         return cls(
             database=db_name,
             table=table_name,
@@ -129,7 +136,7 @@ class PartMetadata(Slotted):
             size=raw_metadata["bytes"],
             files=raw_metadata["files"],
             tarball=raw_metadata.get("tarball", False),
-            link=raw_metadata["link"],
+            link=link,
             disk_name=raw_metadata.get("disk_name", "default"),
             encrypted=raw_metadata.get("encrypted", True),
         )

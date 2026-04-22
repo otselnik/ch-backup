@@ -123,19 +123,23 @@ class Backup:
         """
         return self.meta.get("time_format")
 
-    @property
-    def metadata_path(self) -> str:
+    def get_backup_path(self, path_root: str) -> str:
+        """
+        Compute backup storage path from path_root and backup name.
+        """
+        return os.path.join(path_root, self.name)
+
+    def metadata_path(self, path_root: str) -> str:
         """
         Path to full backup metadata file.
         """
-        return os.path.join(self.meta["path"], "backup_struct.json")
+        return os.path.join(self.get_backup_path(path_root), "backup_struct.json")
 
-    @property
-    def light_metadata_path(self) -> str:
+    def light_metadata_path(self, path_root: str) -> str:
         """
         Path to light backup metadata file.
         """
-        return os.path.join(self.meta["path"], "backup_light_struct.json")
+        return os.path.join(self.get_backup_path(path_root), "backup_light_struct.json")
 
     def update(self, metadata: dict, merge: bool = True) -> None:
         """
@@ -157,11 +161,11 @@ class Backup:
 
         return json.dumps(metadata, indent=indent)
 
-    def get_file_paths(self) -> Sequence[str]:
+    def get_file_paths(self, path_root: str) -> Sequence[str]:
         """
         Return all storage paths
         """
-        backup_path = self.meta["path"]
+        backup_path = self.get_backup_path(path_root)
         cloud_stage_disks = set(self._metadata["cloud_storage"]["disks"])
         file_paths: Set[str] = set()
         for db_name, db_obj in self._metadata["databases"].items():
@@ -170,8 +174,15 @@ class Backup:
                     # Skip S3 parts.
                     if part_obj.get("disk_name") in cloud_stage_disks:
                         continue
+                    # part_obj["link"] may be a full path (old format) or a backup name
+                    # (new format). Normalise to a plain backup name via basename.
+                    raw_link = part_obj.get("link")
+                    link_name = os.path.basename(raw_link) if raw_link else None
+                    source_path = (
+                        os.path.join(path_root, link_name) if link_name else backup_path
+                    )
                     part_path = os.path.join(
-                        part_obj.get("link") or backup_path,
+                        source_path,
                         "data",
                         _quote(db_name),
                         _quote(table_name),
@@ -198,6 +209,12 @@ class BackupManager:
         self._config_path = CH_BACKUP_CONF_PATH
         protocol = context.ch_backup["protocol"]
         self._cmd_base = f"timeout {timeout} {CH_BACKUP_CLI_PATH} --protocol {protocol} --insecure  --config {self._config_path}"
+        # Read path_root from the ch-backup config on the container.
+        conf_output = self._container.exec_run(
+            f"/bin/cat {self._config_path}", user="root"
+        ).output.decode()
+        conf = yaml.load(conf_output, yaml.SafeLoader)
+        self._path_root: str = conf.get("backup", {}).get("path_root", "ch_backup/")
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     def backup(
@@ -384,10 +401,12 @@ class BackupManager:
         backup = self.get_backup(backup_id)
         backup.update(metadata, merge)
         self._s3_client.upload_data(
-            backup.dump_json(light=False).encode("utf-8"), backup.metadata_path
+            backup.dump_json(light=False).encode("utf-8"),
+            backup.metadata_path(self._path_root),
         )
         self._s3_client.upload_data(
-            backup.dump_json(light=True).encode("utf-8"), backup.light_metadata_path
+            backup.dump_json(light=True).encode("utf-8"),
+            backup.light_metadata_path(self._path_root),
         )
 
     def delete_backup_metadata_paths(
@@ -407,10 +426,12 @@ class BackupManager:
         for path in paths:
             delete_path(backup.metadata, path.split("."))
         self._s3_client.upload_data(
-            backup.dump_json(light=False).encode("utf-8"), backup.metadata_path
+            backup.dump_json(light=False).encode("utf-8"),
+            backup.metadata_path(self._path_root),
         )
         self._s3_client.upload_data(
-            backup.dump_json(light=True).encode("utf-8"), backup.light_metadata_path
+            backup.dump_json(light=True).encode("utf-8"),
+            backup.light_metadata_path(self._path_root),
         )
 
     def delete_backup_file(self, backup_id: BackupId, path: str) -> None:
@@ -418,14 +439,18 @@ class BackupManager:
         Delete particular file from backup (useful for fault injection).
         """
         backup = self.get_backup(backup_id)
-        self._s3_client.delete_data(os.path.join(backup.meta["path"], path))
+        self._s3_client.delete_data(
+            os.path.join(backup.get_backup_path(self._path_root), path)
+        )
 
     def set_backup_file_data(self, backup_id: BackupId, path: str, data: bytes) -> None:
         """
         Set particular file data in backup (useful for fault injection).
         """
         backup = self.get_backup(backup_id)
-        self._s3_client.upload_data(data, os.path.join(backup.meta["path"], path))
+        self._s3_client.upload_data(
+            data, os.path.join(backup.get_backup_path(self._path_root), path)
+        )
 
     def get_missed_paths(self, backup_id: BackupId) -> Sequence[str]:
         """
@@ -433,7 +458,7 @@ class BackupManager:
         """
         backup = self.get_backup(backup_id)
         missed = []
-        for path in backup.get_file_paths():
+        for path in backup.get_file_paths(self._path_root):
             if not self._s3_client.path_exists(path):
                 missed.append(path)
         return missed

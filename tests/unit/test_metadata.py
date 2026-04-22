@@ -13,6 +13,7 @@ from ch_backup.backup.metadata import (
     BackupState,
     BackupStorageFormat,
 )
+from ch_backup.backup.metadata.part_metadata import PartMetadata
 
 
 class TestBackupMetadata:
@@ -42,7 +43,6 @@ class TestBackupMetadata:
 
         meta = {
             "name": "20181017T210300",
-            "path": "ch_backup/20181017T210300",
             "time_format": "%Y-%m-%d %H:%M:%S %z",
             "bytes": 0,
             "real_bytes": 0,
@@ -59,7 +59,6 @@ class TestBackupMetadata:
 
         backup = BackupMetadata.load_json(json.dumps(metadata))
         assert backup.name == meta["name"]
-        assert backup.path == meta["path"]
         assert backup.state == BackupState(meta["state"])
         time_format = meta["time_format"]
         assert backup.time_format == time_format
@@ -79,7 +78,6 @@ class TestBackupMetadata:
     def test_dump_is_compact(self):
         backup = BackupMetadata(
             name="20181017T210300",
-            path="ch_backup/20181017T210300",
             version="1.0.100",
             ch_version="19.1.16",
             time_format="%Y-%m-%dT%H:%M:%S%Z",
@@ -118,7 +116,6 @@ class TestBackupMetadata:
         metadata = {
             "meta": {
                 "name": "20181017T210300",
-                "path": "ch_backup/20181017T210300",
                 "time_format": "%Y-%m-%d %H:%M:%S %z",
                 "bytes": 0,
                 "real_bytes": 0,
@@ -254,3 +251,43 @@ class TestAccessControlMetadata:
             },
             "backup_format": "tar",
         }
+
+
+class TestPartMetadata:
+    """
+    Tests for PartMetadata.
+    """
+
+    _BASE_RAW = {
+        "checksum": "abc123",
+        "bytes": 1024,
+        "files": ["data.bin"],
+        "tarball": False,
+        "disk_name": "default",
+        "encrypted": True,
+    }
+
+    @pytest.mark.parametrize(
+        ("raw_link", "expected_link"),
+        [
+            # New format: plain backup name — returned as-is.
+            ("20181017T210300", "20181017T210300"),
+            # Old format: full path with path_root prefix.
+            ("ch_backup/20181017T210300", "20181017T210300"),
+            # Old format: absolute path.
+            ("/srv/backups/20181017T210300", "20181017T210300"),
+            # No link (non-deduplicated part).
+            (None, None),
+            # Empty string treated as no link.
+            ("", None),
+        ],
+    )
+    def test_load_link_normalization(self, raw_link, expected_link):
+        """
+        PartMetadata.load() must normalise the ``link`` field to a plain
+        backup name regardless of whether it was stored as a full path
+        (old format) or already as a name (new format).
+        """
+        raw = {**self._BASE_RAW, "link": raw_link}
+        part = PartMetadata.load("db1", "table1", "part1", raw)
+        assert part.link == expected_link

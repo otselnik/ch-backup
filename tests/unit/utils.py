@@ -114,7 +114,6 @@ def backup_metadata(
         {
             "meta": {
                 "name": name,
-                "path": f"ch_backup/{name}",
                 "hostname": hostname,
                 "state": state,
                 "start_time": start_time,

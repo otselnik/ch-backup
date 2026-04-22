@@ -74,7 +74,6 @@ def test_backup_table_skipping_if_metadata_updated_during_backup(
     table_backup = TableBackup()
     backup_meta = BackupMetadata(
         name="20181017T210300",
-        path="ch_backup/20181017T210300",
         version="1.0.100",
         ch_version="19.1.16",
         time_format="%Y-%m-%dT%H:%M:%S%Z",
