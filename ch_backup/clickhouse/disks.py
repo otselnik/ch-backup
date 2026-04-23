@@ -154,20 +154,20 @@ class ClickHouseTemporaryDisks:
         endpoint = urlparse(disk_config["endpoint"])
         endpoint_netloc = source_endpoint or endpoint.netloc
 
-        tmp_disk_enpoint = os.path.join(
+        tmp_disk_endpoint = os.path.join(
             f"{endpoint.scheme}://{endpoint_netloc}", source_bucket, source_path, ""
         )
-        orig_disk_enpoint = self._disks[disk_name]["endpoint"]
+        orig_disk_endpoint = self._disks[disk_name]["endpoint"]
 
         if self._use_local_copy and not is_equal_s3_endpoints(
-            tmp_disk_enpoint, orig_disk_enpoint
+            tmp_disk_endpoint, orig_disk_endpoint
         ):
             raise RuntimeError(
-                f"Endpoint of tmp object storage disk is not equal to original (original {orig_disk_enpoint}  tmp: {tmp_disk_enpoint})."
+                f"Endpoint of tmp object storage disk is not equal to original (original {orig_disk_endpoint}  tmp: {tmp_disk_endpoint})."
                 "It is required for inplace restore mode."
             )
 
-        disk_config["endpoint"] = tmp_disk_enpoint
+        disk_config["endpoint"] = tmp_disk_endpoint
 
         disks_config = {tmp_disk_name: disk_config}
 
