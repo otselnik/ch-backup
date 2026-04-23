@@ -9,6 +9,21 @@ from ch_backup.clickhouse.models import FrozenPart
 from ch_backup.util import Slotted
 
 
+def normalize_backup_link(raw_link: Optional[str]) -> Optional[str]:
+    """
+    Normalize the ``link`` field to a plain backup name.
+
+    Old backups stored a full storage path (e.g. ``/srv/backups/20181017T210300``
+    or ``ch_backup/20181017T210300``); new backups store just the backup name.
+    ``os.path.basename`` transparently converts both formats to a plain name.
+
+    Returns ``None`` for falsy values (``None``, empty string).
+    """
+    if not raw_link:
+        return None
+    return os.path.basename(raw_link.rstrip("/"))
+
+
 class RawMetadata(Slotted):
     """
     Raw metadata for ClickHouse data part.
@@ -121,13 +136,9 @@ class PartMetadata(Slotted):
         """
         Deserialize data part metadata.
 
-        Normalizes the ``link`` field: old backups stored a full storage path
-        (e.g. ``/srv/backups/20181017T210300``); new backups store just the
-        backup name.  ``os.path.basename`` transparently converts both formats
-        to a plain backup name.
+        The ``link`` field is normalized via :func:`normalize_backup_link`.
         """
-        raw_link = raw_metadata.get("link")
-        link = os.path.basename(raw_link.rstrip("/")) if raw_link else None
+        link = normalize_backup_link(raw_metadata.get("link"))
         return cls(
             database=db_name,
             table=table_name,

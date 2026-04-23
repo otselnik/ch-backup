@@ -15,7 +15,7 @@ from hamcrest import (
     starts_with,
 )
 
-from tests.integration.modules.ch_backup import BackupManager
+from tests.integration.modules.ch_backup_cli import BackupManager
 from tests.integration.modules.docker import get_container
 from tests.integration.modules.steps import get_step_data
 

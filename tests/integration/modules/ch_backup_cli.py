@@ -10,6 +10,8 @@ from urllib.parse import quote
 
 import yaml
 
+from ch_backup.backup.metadata.part_metadata import normalize_backup_link
+
 from . import docker, s3, utils
 from .typing import ContextT
 
@@ -175,9 +177,8 @@ class Backup:
                     if part_obj.get("disk_name") in cloud_stage_disks:
                         continue
                     # part_obj["link"] may be a full path (old format) or a backup name
-                    # (new format). Normalise to a plain backup name via basename.
-                    raw_link = part_obj.get("link")
-                    link_name = os.path.basename(raw_link) if raw_link else None
+                    # (new format). _normalize_backup_link handles both via os.path.basename.
+                    link_name = normalize_backup_link(part_obj.get("link"))
                     source_path = (
                         os.path.join(path_root, link_name) if link_name else backup_path
                     )
