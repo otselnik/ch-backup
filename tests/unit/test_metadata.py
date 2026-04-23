@@ -146,6 +146,43 @@ class TestBackupMetadata:
         }
         assert acl.backup_format == BackupStorageFormat.PLAIN
 
+    def test_load_json_accepts_legacy_path_field(self):
+        """
+        BackupMetadata.load_json() must succeed when the JSON contains the
+        deprecated ``meta.path`` field (present in old backups) and must
+        still populate all other fields correctly.
+
+        Regression test: ensure we do not break reading old backup metadata.
+        """
+        metadata = {
+            "meta": {
+                "name": "20181017T210300",
+                # Legacy field — must be silently ignored during load.
+                "path": "ch_backup/20181017T210300",
+                "time_format": "%Y-%m-%d %H:%M:%S %z",
+                "bytes": 0,
+                "real_bytes": 0,
+                "hostname": "clickhouse01.test_net_711",
+                "version": "1.0.100",
+                "ch_version": "19.1.16",
+                "labels": None,
+                "state": "created",
+                "start_time": "2018-10-18 00:03:00 +0300",
+                "end_time": "2018-10-18 00:04:00 +0300",
+            },
+            "databases": [],
+        }
+
+        backup = BackupMetadata.load_json(json.dumps(metadata))
+
+        assert backup.name == "20181017T210300"
+        assert backup.state == BackupState.CREATED
+        assert backup.hostname == "clickhouse01.test_net_711"
+        assert backup.version == "1.0.100"
+        assert backup.ch_version == "19.1.16"
+        # Legacy field must be silently ignored — must not appear in serialized output.
+        assert "path" not in json.loads(backup.dump_json())["meta"]
+
 
 class TestAccessControlMetadata:
     @pytest.mark.parametrize(
@@ -339,46 +376,3 @@ class TestNormalizeBackupLink:
         old full-path and new name-only formats, and None for falsy input.
         """
         assert normalize_backup_link(raw_link) == expected
-
-
-class TestBackupMetadataLegacyPath:
-    """
-    Backward-compatibility tests for the deprecated ``meta.path`` field.
-    """
-
-    def test_load_json_accepts_legacy_path_field(self):
-        """
-        BackupMetadata.load_json() must succeed when the JSON contains the
-        deprecated ``meta.path`` field (present in old backups) and must
-        still populate all other fields correctly.
-
-        Regression test: ensure we do not break reading old backup metadata.
-        """
-        metadata = {
-            "meta": {
-                "name": "20181017T210300",
-                # Legacy field — must be silently ignored during load.
-                "path": "ch_backup/20181017T210300",
-                "time_format": "%Y-%m-%d %H:%M:%S %z",
-                "bytes": 0,
-                "real_bytes": 0,
-                "hostname": "clickhouse01.test_net_711",
-                "version": "1.0.100",
-                "ch_version": "19.1.16",
-                "labels": None,
-                "state": "created",
-                "start_time": "2018-10-18 00:03:00 +0300",
-                "end_time": "2018-10-18 00:04:00 +0300",
-            },
-            "databases": [],
-        }
-
-        backup = BackupMetadata.load_json(json.dumps(metadata))
-
-        assert backup.name == "20181017T210300"
-        assert backup.state == BackupState.CREATED
-        assert backup.hostname == "clickhouse01.test_net_711"
-        assert backup.version == "1.0.100"
-        assert backup.ch_version == "19.1.16"
-        # Legacy field must be silently ignored — must not appear in serialized output.
-        assert "path" not in json.loads(backup.dump_json())["meta"]
