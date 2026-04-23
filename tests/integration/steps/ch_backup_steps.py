@@ -74,6 +74,18 @@ def step_backup_metadata_delete(context, node, backup_id):
     BackupManager(context, node).delete_backup_metadata_paths(backup_id, paths)
 
 
+@given("part links of {node:w} backup #{backup_id:d} were rewritten to legacy path format")
+@when("part links of {node:w} backup #{backup_id:d} were rewritten to legacy path format")
+def step_rewrite_part_links_to_legacy(context, node, backup_id):
+    """
+    Simulate a backup created by an older ch-backup version by replacing all
+    ``link`` values (plain backup names) with legacy full-path strings
+    (``<path_root>/<backup_name>``).  This exercises the backward-compatibility
+    path of ``normalize_backup_link()`` end-to-end.
+    """
+    BackupManager(context, node).rewrite_part_links_to_legacy_format(backup_id)
+
+
 @given('file "{path}" was deleted from {node:w} backup #{backup_id:d}')
 @given('file "{path}" was deleted from {node:w} backup "{backup_id:d}"')
 def step_delete_backup_file(context, path, node, backup_id):

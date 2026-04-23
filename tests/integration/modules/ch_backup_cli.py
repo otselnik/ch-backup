@@ -453,6 +453,33 @@ class BackupManager:
             data, os.path.join(backup.get_backup_path(self._path_root), path)
         )
 
+    def rewrite_part_links_to_legacy_format(self, backup_id: BackupId) -> None:
+        """
+        Rewrite all ``link`` fields in backup part metadata from the new
+        plain-name format (e.g. ``"20181017T210300"``) to the legacy full-path
+        format (e.g. ``"ch_backup/20181017T210300"``).
+
+        This is used in integration tests to simulate a backup that was created
+        by an older version of ch-backup, so that the backward-compatibility
+        path of ``normalize_backup_link()`` is exercised end-to-end.
+        """
+        backup = self.get_backup(backup_id)
+        for db_obj in backup.metadata.get("databases", {}).values():
+            for table_obj in db_obj.get("tables", {}).values():
+                for part_obj in table_obj.get("parts", {}).values():
+                    link = part_obj.get("link")
+                    if link:
+                        # Convert plain name → legacy path: "ch_backup/<name>"
+                        part_obj["link"] = os.path.join(self._path_root, link)
+        self._s3_client.upload_data(
+            backup.dump_json(light=False).encode("utf-8"),
+            backup.metadata_path(self._path_root),
+        )
+        self._s3_client.upload_data(
+            backup.dump_json(light=True).encode("utf-8"),
+            backup.light_metadata_path(self._path_root),
+        )
+
     def get_missed_paths(self, backup_id: BackupId) -> Sequence[str]:
         """
         Get backup entry metadata.
