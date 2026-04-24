@@ -135,10 +135,7 @@ class PartMetadata(Slotted):
     ) -> "PartMetadata":
         """
         Deserialize data part metadata.
-
-        The ``link`` field is normalized via :func:`normalize_backup_link`.
         """
-        link = normalize_backup_link(raw_metadata.get("link"))
         return cls(
             database=db_name,
             table=table_name,
@@ -147,7 +144,7 @@ class PartMetadata(Slotted):
             size=raw_metadata["bytes"],
             files=raw_metadata["files"],
             tarball=raw_metadata.get("tarball", False),
-            link=link,
+            link=normalize_backup_link(raw_metadata.get("link")),
             disk_name=raw_metadata.get("disk_name", "default"),
             encrypted=raw_metadata.get("encrypted", True),
         )
