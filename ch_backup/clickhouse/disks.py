@@ -74,7 +74,9 @@ class ClickHouseTemporaryDisks:
         self._ch_availible_disks: Dict[str, Disk] = {}
 
     def __enter__(self):
-        self._disks = self._ch_config.config.get("storage_configuration", {}).get("disks", {})
+        self._disks = self._ch_config.config.get("storage_configuration", {}).get(
+            "disks", {}
+        )
         for disk_name in self._backup_meta.cloud_storage.disks:
             self._create_temporary_disk(
                 self._backup_meta,
