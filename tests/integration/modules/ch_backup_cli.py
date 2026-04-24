@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import yaml
 
-from ch_backup.backup.metadata.part_metadata import normalize_backup_link
+from ch_backup.backup.metadata import normalize_backup_link
 
 from . import docker, s3, utils
 from .typing import ContextT
