@@ -79,6 +79,7 @@ class TestBackupMetadata:
     def test_dump_is_compact(self):
         backup = BackupMetadata(
             name="20181017T210300",
+            path="ch_backup/20181017T210300",
             version="1.0.100",
             ch_version="19.1.16",
             time_format="%Y-%m-%dT%H:%M:%S%Z",
@@ -87,8 +88,9 @@ class TestBackupMetadata:
 
         dump = backup.dump()
         assert backup.dump_json().find(" ") == -1
-        # Deprecated `path` field must not be emitted anymore
-        assert "path" not in dump["meta"]
+        # Deprecated `path` field is still emitted for backward compatibility
+        # with older ch-backup versions that read it.
+        assert dump["meta"]["path"] == "ch_backup/20181017T210300"
 
     @pytest.mark.parametrize(
         "access_control",
@@ -158,7 +160,9 @@ class TestBackupMetadata:
         metadata = {
             "meta": {
                 "name": "20181017T210300",
-                # Legacy field — must be silently ignored during load.
+                # DEPRECATED legacy field — preserved on load and re-emitted
+                # on dump for backward compatibility with older ch-backup
+                # versions.
                 "path": "ch_backup/20181017T210300",
                 "time_format": "%Y-%m-%d %H:%M:%S %z",
                 "bytes": 0,
@@ -181,8 +185,13 @@ class TestBackupMetadata:
         assert backup.hostname == "clickhouse01.test_net_711"
         assert backup.version == "1.0.100"
         assert backup.ch_version == "19.1.16"
-        # Legacy field must be silently ignored — must not appear in serialized output.
-        assert "path" not in json.loads(backup.dump_json())["meta"]
+        # Legacy ``path`` is preserved through the load/dump round-trip
+        # (deprecated, but still required for older ch-backup versions).
+        assert backup.path == "ch_backup/20181017T210300"
+        assert (
+            json.loads(backup.dump_json())["meta"]["path"]
+            == "ch_backup/20181017T210300"
+        )
 
 
 class TestAccessControlMetadata:

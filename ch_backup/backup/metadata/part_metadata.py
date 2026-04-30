@@ -13,9 +13,15 @@ def normalize_backup_link(raw_link: Optional[str]) -> Optional[str]:
     """
     Normalize the ``link`` field to a plain backup name.
 
-    Old backups stored a full storage path (e.g. ``/srv/backups/20181017T210300``
-    or ``ch_backup/20181017T210300``); new backups store just the backup name.
-    ``os.path.basename`` transparently converts both formats to a plain name.
+    The serialized ``link`` field is intentionally stored as a full storage
+    path (legacy format) so that older ch-backup versions can still read
+    backups produced by this code.  In-memory we always work with a plain
+    backup name; this helper performs the conversion at load time.
+
+    ``os.path.basename`` handles both formats transparently:
+    - ``"20181017T210300"``                 → ``"20181017T210300"`` (new)
+    - ``"ch_backup/20181017T210300"``       → ``"20181017T210300"`` (legacy)
+    - ``"/srv/backups/20181017T210300/"``   → ``"20181017T210300"`` (legacy)
 
     Returns ``None`` for falsy values (``None``, empty string).
     """

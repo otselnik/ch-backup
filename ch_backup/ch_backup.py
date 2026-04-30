@@ -159,6 +159,9 @@ class ClickhouseBackup:
 
         self._context.backup_meta = BackupMetadata(
             name=name,
+            # DEPRECATED: ``path`` is populated for backward compatibility
+            # with older ch-backup versions and is not used by new code.
+            path=self._context.backup_layout.get_backup_path(name),
             labels=backup_labels,
             version=get_version(),
             ch_version=self._context.ch_ctl.get_version(),
