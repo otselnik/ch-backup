@@ -31,35 +31,61 @@ jobs:
       run: make mypy
 
   test:
-    name: test (Python ${{ matrix.python }}, ClickHouse ${{ matrix.clickhouse }})
+    name: "test (Python ${{ matrix.python }}, ClickHouse ${{ matrix.clickhouse }})${{ matrix.shard != 1 && format(' [shard {0}/3]', matrix.shard) || '' }}"
     needs: lint
     strategy:
       fail-fast: false
       matrix:
+        target:
+        - py310-clickhouse-23-3
+        - py310-clickhouse-23-8
+        - py310-clickhouse-24-3
+        - py310-clickhouse-24-8
+        - py310-clickhouse-25-3
+        - py310-clickhouse-25-8
+        - py310-clickhouse-26-3
+        - py310-clickhouse-latest
+        - py311-clickhouse-latest
+        - py312-clickhouse-latest
+        - py313-clickhouse-latest
+        - py314-clickhouse-latest
+        shard: [1, 2, 3]
         include:
-        - python: "3.10"
+        - target: py310-clickhouse-23-3
+          python: "3.10"
           clickhouse: "23.3.22.3"
-        - python: "3.10"
+        - target: py310-clickhouse-23-8
+          python: "3.10"
           clickhouse: "23.8.16.40"
-        - python: "3.10"
+        - target: py310-clickhouse-24-3
+          python: "3.10"
           clickhouse: "24.3.18.7"
-        - python: "3.10"
+        - target: py310-clickhouse-24-8
+          python: "3.10"
           clickhouse: "24.8.14.39"
-        - python: "3.10"
+        - target: py310-clickhouse-25-3
+          python: "3.10"
           clickhouse: "25.3.12.8"
-        - python: "3.10"
+        - target: py310-clickhouse-25-8
+          python: "3.10"
           clickhouse: "25.8.23.13"
-        - python: "3.10"
+        - target: py310-clickhouse-26-3
+          python: "3.10"
           clickhouse: "26.3.12.3"
-        - python: "3.10"
+        - target: py310-clickhouse-latest
+          python: "3.10"
           clickhouse: "latest"
-        - python: "3.11"
+        - target: py311-clickhouse-latest
+          python: "3.11"
           clickhouse: "latest"
-        - python: "3.12"
+        - target: py312-clickhouse-latest
+          python: "3.12"
           clickhouse: "latest"
-        - python: "3.13"
+        - target: py313-clickhouse-latest
+          python: "3.13"
           clickhouse: "latest"
-        - python: "3.14"
+        - target: py314-clickhouse-latest
+          python: "3.14"
           clickhouse: "latest"
     runs-on: ubuntu-22.04
     steps:
@@ -68,14 +94,31 @@ jobs:
       with:
         python-version: ${{ matrix.python }}
     - name: run unit tests
+      if: matrix.shard == 1
       run: make test-unit
     - name: run integration tests
       run: make test-integration
       env:
+        BEHAVE_ARGS: --junit --junit-directory staging/junit
         CLICKHOUSE_VERSION: ${{ matrix.clickhouse == 'latest' && env.LATEST_CLICKHOUSE_VERSION || matrix.clickhouse }}
+        INTEGRATION_SHARD_COUNT: 3
+        INTEGRATION_SHARD_INDEX: ${{ matrix.shard }}
     - uses: actions/upload-artifact@v7
-      if: ${{ failure() }}
+      if: ${{ always() }}
       with:
-        name: integration-test-logs-py${{ matrix.python }}-clickhouse-${{ matrix.clickhouse }}
-        path: staging/logs/
+        name: integration-test-results-py${{ matrix.python }}-clickhouse-${{ matrix.clickhouse }}-shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+        path: |
+          staging/junit/
+          staging/logs/
         if-no-files-found: ignore
+
+  test-summary:
+    name: test summary
+    needs: test
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: check test matrix result
+      env:
+        TEST_RESULT: ${{ needs.test.result }}
+      run: test "$TEST_RESULT" = success

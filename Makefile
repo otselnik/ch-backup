@@ -5,6 +5,9 @@ export COMPOSE_HTTP_TIMEOUT ?= 300
 export CLICKHOUSE_VERSION ?= latest
 export PROJECT_NAME ?= ch-backup
 export DEV_MODE ?= false
+export INTEGRATION_FEATURESET ?= tests/integration/ch_backup.featureset
+export INTEGRATION_SHARD_COUNT ?= 1
+export INTEGRATION_SHARD_INDEX ?= 1
 
 export BUILD_PYTHON_OUTPUT_DIR ?= dist
 export BUILD_DEB_OUTPUT_DIR ?= out
@@ -32,6 +35,7 @@ SRC_DIR = ch_backup
 TESTS_DIR = tests
 VENV = .venv
 SESSION_FILE = .session_conf.sav
+SHARD_FEATURESET = staging/ch_backup-shard.featureset
 INSTALL_DIR = $(DESTDIR)/opt/yandex/ch-backup
 INTEGRATION_TEST_TOOL=uv run python -m tests.integration.env_control
 
@@ -102,8 +106,13 @@ test-unit: setup
 
 .PHONY: test-integration
 test-integration: create-test-env
-	rm -rf staging/logs
-	uv run behave --show-timings --stop -D skip_setup $(BEHAVE_ARGS) @tests/integration/ch_backup.featureset
+	rm -rf staging/logs staging/junit
+	uv run python -m tests.integration.sharding \
+		--featureset "$(INTEGRATION_FEATURESET)" \
+		--shards "$(INTEGRATION_SHARD_COUNT)" \
+		--index "$(INTEGRATION_SHARD_INDEX)" \
+		--output "$(SHARD_FEATURESET)"
+	uv run behave --show-timings --stop -D skip_setup $(BEHAVE_ARGS) @"$(SHARD_FEATURESET)"
 
 
 .PHONY: clean
@@ -241,3 +250,6 @@ help:
 	@echo "  PYTEST_ARGS                Arguments to pass to pytest (unit tests)."
 	@echo "  BEHAVE_ARGS                Arguments to pass to behave (integration tests)."
 	@echo "  CLICKHOUSE_VERSION         ClickHouse version to use in integration tests (default: \"$(CLICKHOUSE_VERSION)\")."
+	@echo "  INTEGRATION_FEATURESET     Behave feature list to shard (default: \"$(INTEGRATION_FEATURESET)\")."
+	@echo "  INTEGRATION_SHARD_COUNT    Number of integration test shards (default: \"$(INTEGRATION_SHARD_COUNT)\")."
+	@echo "  INTEGRATION_SHARD_INDEX    One-based integration test shard index (default: \"$(INTEGRATION_SHARD_INDEX)\")."
